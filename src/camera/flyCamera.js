@@ -55,6 +55,8 @@ export class FlyCamera {
 
       this.canvas.addEventListener('pointerdown', e => {
         if (e.target.closest('#mobile-controls')) return;
+        e.preventDefault();
+        this.canvas.setPointerCapture?.(e.pointerId);
         this._touchLook.active = true;
         this._touchLook.pointerId = e.pointerId;
         this._touchLook.lastX = e.clientX;
@@ -63,6 +65,7 @@ export class FlyCamera {
 
       this.canvas.addEventListener('pointermove', e => {
         if (!this._touchLook.active || e.pointerId !== this._touchLook.pointerId) return;
+        e.preventDefault();
         const dx = e.clientX - this._touchLook.lastX;
         const dy = e.clientY - this._touchLook.lastY;
 
@@ -130,6 +133,7 @@ export class FlyCamera {
 
     base.addEventListener('pointerdown', e => {
       e.preventDefault();
+      base.setPointerCapture?.(e.pointerId);
       this._joystick.active = true;
       this._joystick.pointerId = e.pointerId;
       move(e);
