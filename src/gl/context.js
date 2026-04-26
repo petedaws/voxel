@@ -14,6 +14,8 @@ export function createContext(canvas) {
   gl.enable(gl.DEPTH_TEST);
   gl.enable(gl.CULL_FACE);
   gl.cullFace(gl.BACK);
+  // The camera/world convention is +Z-forward, which flips winding in WebGL.
+  gl.frontFace(gl.CW);
 
   window.addEventListener('resize', resize);
   globalThis.visualViewport?.addEventListener('resize', resize);

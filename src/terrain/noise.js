@@ -7,6 +7,7 @@ const HASH_MULTIPLIER = 0x53A3F72DEEC546F5n;
 const ROOT2OVER2 = 0.7071067811865476;
 const SKEW_2D    =  0.366025403784439;
 const UNSKEW_2D  = -0.21132486540518713;
+const FBM_NORMALIZATION = 55;
 
 const GRAD2 = new Float64Array([
    0.38268343236509,   0.923879532511287,
@@ -115,5 +116,5 @@ export function fbm(seed, x, y, octaves, frequency, lacunarity, persistence) {
     amp    *= persistence;
     freq   *= lacunarity;
   }
-  return value / maxAmp;
+  return Math.max(-1, Math.min(1, (value / maxAmp) * FBM_NORMALIZATION));
 }

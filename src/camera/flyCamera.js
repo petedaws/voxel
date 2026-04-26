@@ -1,14 +1,20 @@
 import { FLY_SPEED, CHUNK_SIZE, RENDER_DIST } from '../config.js';
+import { getSurfaceHeight } from '../terrain/generator.js';
 
 const DEG2RAD   = Math.PI / 180;
 const PITCH_LIM = 89 * DEG2RAD;
+const SPAWN_CLEARANCE = 18;
 
 export class FlyCamera {
   constructor(canvas) {
+    const spawnX = 0;
+    const spawnZ = 0;
+    const spawnY = getSurfaceHeight(spawnX, spawnZ) + SPAWN_CLEARANCE;
+
     this.canvas   = canvas;
-    this.position = new Float32Array([0, 80, 0]);
-    this.yaw      = 0;   // rotation around Y; 0 = looking +Z
-    this.pitch    = 0;   // rotation around X; positive = look up
+    this.position = new Float32Array([spawnX, spawnY, spawnZ]);
+    this.yaw      = 0;             // rotation around Y; 0 = looking +Z
+    this.pitch    = -12 * DEG2RAD; // rotation around X; positive = look up
     this.fov      = 70 * DEG2RAD;
     this.speed    = FLY_SPEED;
 
@@ -18,6 +24,7 @@ export class FlyCamera {
 
     this._keys   = {};
     this._locked = false;
+    this._inputEnabled = true;
 
     this._mobile = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
     this._touchMove = { strafe: 0, fwd: 0 };
@@ -28,17 +35,46 @@ export class FlyCamera {
   }
 
   _bindInput() {
-    document.addEventListener('keydown', e => { this._keys[e.code] = true; });
-    document.addEventListener('keyup',   e => { this._keys[e.code] = false; });
-
     const overlay = document.getElementById('overlay');
+    const overlayButtons = [
+      document.getElementById('overlay-start'),
+      document.getElementById('overlay-close'),
+    ].filter(Boolean);
+
+    this._inputEnabled = !overlay || overlay.classList.contains('hidden');
+
+    const closeOverlay = (requestLock) => {
+      overlay?.classList.add('hidden');
+      this._inputEnabled = true;
+      this._keys = {};
+      if (requestLock) this._requestPointerLock();
+    };
+
+    for (const button of overlayButtons) {
+      button.addEventListener('click', e => {
+        e.preventDefault();
+        closeOverlay(!this._mobile);
+      });
+    }
+
+    document.addEventListener('keydown', e => {
+      if (!this._inputEnabled) {
+        if (e.code === 'Escape') closeOverlay(false);
+        return;
+      }
+      this._keys[e.code] = true;
+    });
+
+    document.addEventListener('keyup', e => { this._keys[e.code] = false; });
+    window.addEventListener('blur', () => { this._keys = {}; });
 
     if (!this._mobile) {
-      this.canvas.addEventListener('click', () => this.canvas.requestPointerLock());
+      this.canvas.addEventListener('click', () => {
+        if (this._inputEnabled) this._requestPointerLock();
+      });
 
       document.addEventListener('pointerlockchange', () => {
         this._locked = document.pointerLockElement === this.canvas;
-        overlay?.classList.toggle('hidden', this._locked);
       });
 
       document.addEventListener('mousemove', e => {
@@ -49,11 +85,9 @@ export class FlyCamera {
       });
     } else {
       this._locked = true;
-      overlay?.addEventListener('pointerdown', () => {
-        overlay.classList.add('hidden');
-      });
 
       this.canvas.addEventListener('pointerdown', e => {
+        if (!this._inputEnabled) return;
         if (e.target.closest('#mobile-controls')) return;
         e.preventDefault();
         this.canvas.setPointerCapture?.(e.pointerId);
@@ -89,8 +123,14 @@ export class FlyCamera {
     }
 
     document.addEventListener('wheel', e => {
+      if (!this._inputEnabled) return;
       this.speed = Math.max(0.5, Math.min(100, this.speed * (e.deltaY > 0 ? 0.9 : 1.1)));
     }, { passive: true });
+  }
+
+  _requestPointerLock() {
+    const request = this.canvas.requestPointerLock?.();
+    request?.catch?.(() => {});
   }
 
   _bindJoystick() {
@@ -145,8 +185,14 @@ export class FlyCamera {
   }
 
   update(dt) {
+    if (!this._inputEnabled) {
+      this._buildMatrices();
+      return;
+    }
+
     const k   = this._keys;
     const sy  = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     // forward=(sy,0,cy)  right=(cy,0,-sy)  consistent with yaw=0→+Z
     const keyboardFwd    = k['KeyW'] ? 1 : k['KeyS'] ? -1 : 0;
     const keyboardStrafe = k['KeyD'] ? 1 : k['KeyA'] ? -1 : 0;
@@ -154,9 +200,19 @@ export class FlyCamera {
     const strafe = Math.max(-1, Math.min(1, keyboardStrafe + this._touchMove.strafe));
     const vert   = k['Space'] ? 1 : (k['ShiftLeft'] || k['ShiftRight']) ? -1 : 0;
 
-    this.position[0] += (sy * fwd + cy * strafe) * this.speed * dt;
-    this.position[2] += (cy * fwd - sy * strafe) * this.speed * dt;
-    this.position[1] += vert * this.speed * dt;
+    let dx = sy * cp * fwd + cy * strafe;
+    let dy = sp * fwd + vert;
+    let dz = cy * cp * fwd - sy * strafe;
+    const len = Math.hypot(dx, dy, dz);
+    if (len > 1) {
+      dx /= len;
+      dy /= len;
+      dz /= len;
+    }
+
+    this.position[0] += dx * this.speed * dt;
+    this.position[1] += dy * this.speed * dt;
+    this.position[2] += dz * this.speed * dt;
 
     this._buildMatrices();
   }
@@ -191,7 +247,7 @@ function _perspective(out, fovy, aspect, near, far) {
 
 function _lookAt(out, eye, fdx, fdy, fdz) {
   // right = up(0,1,0) × forward
-  let rx = -fdz, ry = 0, rz = fdx;
+  let rx = fdz, ry = 0, rz = -fdx;
   const rLen = Math.sqrt(rx*rx + rz*rz) || 1;
   rx /= rLen; rz /= rLen;
 
