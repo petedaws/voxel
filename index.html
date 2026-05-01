@@ -48,6 +48,57 @@
     }
     #overlay h1 { font-size: 28px; margin-bottom: 8px; }
     #overlay.hidden { display: none; }
+
+    /* Touch controls — shown only on touch devices via .touch class on body */
+    #touch-controls { display: none; }
+    .touch-hint     { display: none; }
+    body.touch #touch-controls { display: block; }
+    body.touch .desktop-only   { display: none; }
+    body.touch .touch-hint     { display: block; }
+
+    #touch-stick {
+      position: absolute;
+      bottom: 32px;
+      left: 32px;
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      border: 2px solid rgba(255,255,255,0.25);
+      touch-action: none;
+      user-select: none;
+    }
+    #touch-stick-knob {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.35);
+      border: 2px solid rgba(255,255,255,0.6);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .touch-btn {
+      position: absolute;
+      right: 32px;
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.12);
+      border: 2px solid rgba(255,255,255,0.35);
+      color: #fff;
+      font: 24px/1 sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: none;
+      user-select: none;
+    }
+    .touch-btn.active { background: rgba(255,255,255,0.35); }
+    #touch-up   { bottom: 116px; }
+    #touch-down { bottom: 32px; }
   </style>
 </head>
 <body>
@@ -56,8 +107,14 @@
   <div id="crosshair"></div>
   <div id="overlay">
     <h1>Voxel Terrain</h1>
-    <p>Click to start flying</p>
-    <p style="font-size:13px;opacity:0.7">WASD — move &nbsp;|&nbsp; Mouse — look &nbsp;|&nbsp; Space/Shift — up/down &nbsp;|&nbsp; Scroll — speed &nbsp;|&nbsp; [ ] — render distance</p>
+    <p>Tap to start flying</p>
+    <p class="desktop-only" style="font-size:13px;opacity:0.7">WASD — move &nbsp;|&nbsp; Mouse — look &nbsp;|&nbsp; Space/Shift — up/down &nbsp;|&nbsp; Scroll — speed &nbsp;|&nbsp; [ ] — render distance</p>
+    <p class="touch-hint" style="font-size:13px;opacity:0.7">Joystick — move &nbsp;|&nbsp; Drag — look &nbsp;|&nbsp; ▲▼ — up/down</p>
+  </div>
+  <div id="touch-controls">
+    <div id="touch-stick"><div id="touch-stick-knob"></div></div>
+    <div id="touch-up"   class="touch-btn">▲</div>
+    <div id="touch-down" class="touch-btn">▼</div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>

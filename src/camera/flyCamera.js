@@ -18,6 +18,13 @@ export class FlyCamera {
 
     this._keys   = {};
     this._locked = false;
+
+    // Touch state: virtual joystick (movement) + drag-look + vertical buttons
+    this._touchMove = { id: null, dx: 0, dy: 0 }; // joystick offset, pixels
+    this._touchLook = { id: null, x: 0, y: 0 };
+    this._touchVert = 0; // -1, 0, +1 from on-screen up/down buttons
+    this._isTouch   = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
     this._bindInput();
   }
 
@@ -25,7 +32,9 @@ export class FlyCamera {
     document.addEventListener('keydown', e => { this._keys[e.code] = true; });
     document.addEventListener('keyup',   e => { this._keys[e.code] = false; });
 
-    this.canvas.addEventListener('click', () => this.canvas.requestPointerLock());
+    this.canvas.addEventListener('click', () => {
+      if (!this._isTouch) this.canvas.requestPointerLock();
+    });
 
     document.addEventListener('pointerlockchange', () => {
       this._locked = document.pointerLockElement === this.canvas;
@@ -42,15 +51,128 @@ export class FlyCamera {
     document.addEventListener('wheel', e => {
       this.speed = Math.max(0.5, Math.min(100, this.speed * (e.deltaY > 0 ? 0.9 : 1.1)));
     }, { passive: true });
+
+    if (this._isTouch) this._bindTouch();
+  }
+
+  _bindTouch() {
+    const overlay = document.getElementById('overlay');
+    const stick   = document.getElementById('touch-stick');
+    const knob    = document.getElementById('touch-stick-knob');
+    const upBtn   = document.getElementById('touch-up');
+    const downBtn = document.getElementById('touch-down');
+
+    // Reveal touch UI and dismiss start overlay on first tap
+    document.body.classList.add('touch');
+    const dismissOverlay = () => overlay?.classList.add('hidden');
+    overlay?.addEventListener('touchstart', e => { e.preventDefault(); dismissOverlay(); }, { passive: false });
+
+    const STICK_RADIUS = 60;
+
+    const onStickStart = e => {
+      const t = e.changedTouches[0];
+      this._touchMove.id = t.identifier;
+      const r = stick.getBoundingClientRect();
+      this._stickCx = r.left + r.width / 2;
+      this._stickCy = r.top  + r.height / 2;
+      this._updateStick(t.clientX, t.clientY, knob, STICK_RADIUS);
+      e.preventDefault();
+    };
+
+    stick?.addEventListener('touchstart', onStickStart, { passive: false });
+
+    const setVert = (v, btn) => e => {
+      this._touchVert = v;
+      btn.classList.add('active');
+      e.preventDefault();
+    };
+    const clearVert = btn => e => {
+      this._touchVert = 0;
+      btn.classList.remove('active');
+      e.preventDefault();
+    };
+    upBtn?.addEventListener('touchstart', setVert(+1, upBtn),  { passive: false });
+    upBtn?.addEventListener('touchend',   clearVert(upBtn),     { passive: false });
+    upBtn?.addEventListener('touchcancel',clearVert(upBtn),     { passive: false });
+    downBtn?.addEventListener('touchstart', setVert(-1, downBtn), { passive: false });
+    downBtn?.addEventListener('touchend',   clearVert(downBtn),   { passive: false });
+    downBtn?.addEventListener('touchcancel',clearVert(downBtn),   { passive: false });
+
+    // Look-drag: any touch on the canvas that isn't on a UI control
+    this.canvas.addEventListener('touchstart', e => {
+      dismissOverlay();
+      for (const t of e.changedTouches) {
+        if (this._touchLook.id === null && t.identifier !== this._touchMove.id) {
+          this._touchLook.id = t.identifier;
+          this._touchLook.x  = t.clientX;
+          this._touchLook.y  = t.clientY;
+        }
+      }
+      e.preventDefault();
+    }, { passive: false });
+
+    document.addEventListener('touchmove', e => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === this._touchMove.id) {
+          this._updateStick(t.clientX, t.clientY, knob, STICK_RADIUS);
+        } else if (t.identifier === this._touchLook.id) {
+          const dx = t.clientX - this._touchLook.x;
+          const dy = t.clientY - this._touchLook.y;
+          this._touchLook.x = t.clientX;
+          this._touchLook.y = t.clientY;
+          this.yaw   += dx * 0.005;
+          this.pitch -= dy * 0.005;
+          this.pitch  = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, this.pitch));
+        }
+      }
+    }, { passive: false });
+
+    const endTouch = e => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === this._touchMove.id) {
+          this._touchMove.id = null;
+          this._touchMove.dx = 0;
+          this._touchMove.dy = 0;
+          if (knob) knob.style.transform = 'translate(-50%, -50%)';
+        } else if (t.identifier === this._touchLook.id) {
+          this._touchLook.id = null;
+        }
+      }
+    };
+    document.addEventListener('touchend',    endTouch, { passive: false });
+    document.addEventListener('touchcancel', endTouch, { passive: false });
+  }
+
+  _updateStick(clientX, clientY, knob, radius) {
+    let dx = clientX - this._stickCx;
+    let dy = clientY - this._stickCy;
+    const len = Math.hypot(dx, dy);
+    if (len > radius) { dx = dx * radius / len; dy = dy * radius / len; }
+    this._touchMove.dx = dx / radius;
+    this._touchMove.dy = dy / radius;
+    if (knob) knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
   update(dt) {
     const k   = this._keys;
     const sy  = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     // forward=(sy,0,cy)  right=(cy,0,-sy)  consistent with yaw=0→+Z
-    const fwd    = k['KeyW'] ? 1 : k['KeyS'] ? -1 : 0;
-    const strafe = k['KeyD'] ? 1 : k['KeyA'] ? -1 : 0;
-    const vert   = k['Space'] ? 1 : (k['ShiftLeft'] || k['ShiftRight']) ? -1 : 0;
+    let fwd    = k['KeyW'] ? 1 : k['KeyS'] ? -1 : 0;
+    let strafe = k['KeyD'] ? 1 : k['KeyA'] ? -1 : 0;
+    let vert   = k['Space'] ? 1 : (k['ShiftLeft'] || k['ShiftRight']) ? -1 : 0;
+
+    // Touch joystick: dy<0 (up) = forward, dx>0 (right) = strafe right
+    if (this._touchMove.id !== null) {
+      fwd    += -this._touchMove.dy;
+      strafe +=  this._touchMove.dx;
+    }
+    if (this._touchVert) vert += this._touchVert;
+
+    // Clamp combined vector so simultaneous keyboard + touch can't double speed
+    const hLen = Math.hypot(fwd, strafe);
+    if (hLen > 1) { fwd /= hLen; strafe /= hLen; }
+    if (vert >  1) vert =  1;
+    if (vert < -1) vert = -1;
 
     this.position[0] += (sy * fwd + cy * strafe) * this.speed * dt;
     this.position[2] += (cy * fwd - sy * strafe) * this.speed * dt;
@@ -93,10 +215,10 @@ function _lookAt(out, eye, fdx, fdy, fdz) {
   const rLen = Math.sqrt(rx*rx + rz*rz) || 1;
   rx /= rLen; rz /= rLen;
 
-  // up = forward × right  (re-orthogonalise)
-  const ux = fdy * rz - fdz * ry;
-  const uy = fdz * rx - fdx * rz;
-  const uz = fdx * ry - fdy * rx;
+  // up = right × forward  (re-orthogonalise; gives (0,1,0) at level orientation)
+  const ux = ry * fdz - rz * fdy;
+  const uy = rz * fdx - rx * fdz;
+  const uz = rx * fdy - ry * fdx;
 
   // Column-major view matrix
   out[0]=rx;   out[1]=ux;   out[2]=-fdx;  out[3]=0;
