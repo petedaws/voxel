@@ -16,6 +16,16 @@ export const WORKER_COUNT  = Math.min(
   MAX_WORKERS
 );
 
+// Player physics
+export const PLAYER_WIDTH      = 0.6;   // total AABB width on X and Z (centered on position)
+export const PLAYER_HEIGHT     = 1.8;   // AABB height; feet at position.y, head at position.y + HEIGHT
+export const PLAYER_EYE_HEIGHT = 1.62;  // eye offset above feet
+export const WALK_SPEED        = 5.0;
+export const JUMP_VELOCITY     = 8.5;
+export const GRAVITY           = 28.0;  // m/s^2
+export const TERMINAL_VELOCITY = 60.0;
+export const REACH_DISTANCE    = 6.0;   // max raycast distance for block targeting
+
 export const BLOCK = {
   AIR:   0,
   STONE: 1,

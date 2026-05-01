@@ -1,6 +1,6 @@
 import { createContext } from './gl/context.js';
 import { Renderer } from './renderer/renderer.js';
-import { FlyCamera } from './camera/flyCamera.js';
+import { PlayerController } from './camera/playerController.js';
 import { ChunkManager } from './terrain/chunkManager.js';
 import { HUD } from './ui/hud.js';
 
@@ -9,9 +9,9 @@ async function main() {
   const gl     = createContext(canvas);
 
   const renderer     = new Renderer(gl);
-  const camera       = new FlyCamera(canvas);
   const chunkManager = new ChunkManager(renderer);
-  const hud          = new HUD(camera, chunkManager);
+  const player       = new PlayerController(canvas, chunkManager);
+  const hud          = new HUD(player, chunkManager);
 
   let last = 0;
 
@@ -19,12 +19,12 @@ async function main() {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
 
-    camera.update(dt);
-    chunkManager.update(camera.position);
+    chunkManager.update(player.position);
+    player.update(dt);
 
     const chunks        = chunkManager.readyChunks;
-    const frustumPlanes = camera.frustumPlanes;
-    const visibleCount  = renderer.render(camera, chunks, frustumPlanes);
+    const frustumPlanes = player.frustumPlanes;
+    const visibleCount  = renderer.render(player, chunks, frustumPlanes);
 
     hud.update(now, visibleCount);
     requestAnimationFrame(frame);
