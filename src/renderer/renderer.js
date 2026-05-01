@@ -91,7 +91,7 @@ export class Renderer {
     gl.useProgram(this.terrainProg);
     const tu = this._tUni;
     gl.uniformMatrix4fv(tu.u_viewProjection, false, camera.viewProjection);
-    gl.uniform3fv(tu.u_cameraPos,  camera.position);
+    gl.uniform3fv(tu.u_cameraPos,  (camera.cameraPos || camera.position));
     gl.uniform3fv(tu.u_fogColor,   FOG_COLOR);
     gl.uniform1f(tu.u_fogDensity,  FOG_DENSITY);
     gl.uniform1i(tu.u_atlas, 0);
@@ -116,7 +116,7 @@ export class Renderer {
     gl.useProgram(this.waterProg);
     const wu = this._wUni;
     gl.uniformMatrix4fv(wu.u_viewProjection, false, camera.viewProjection);
-    gl.uniform3fv(wu.u_cameraPos,  camera.position);
+    gl.uniform3fv(wu.u_cameraPos,  (camera.cameraPos || camera.position));
     gl.uniform3fv(wu.u_fogColor,   FOG_COLOR);
     gl.uniform1f(wu.u_fogDensity,  FOG_DENSITY);
 
