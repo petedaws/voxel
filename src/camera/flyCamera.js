@@ -1,14 +1,20 @@
 import { FLY_SPEED, CHUNK_SIZE, RENDER_DIST } from '../config.js';
+import { getSurfaceHeight } from '../terrain/generator.js';
 
 const DEG2RAD   = Math.PI / 180;
 const PITCH_LIM = 89 * DEG2RAD;
+const SPAWN_CLEARANCE = 18;
 
 export class FlyCamera {
   constructor(canvas) {
+    const spawnX = 0;
+    const spawnZ = 0;
+    const spawnY = getSurfaceHeight(spawnX, spawnZ) + SPAWN_CLEARANCE;
+
     this.canvas   = canvas;
-    this.position = new Float32Array([0, 80, 0]);
-    this.yaw      = 0;   // rotation around Y; 0 = looking +Z
-    this.pitch    = 0;   // rotation around X; positive = look up
+    this.position = new Float32Array([spawnX, spawnY, spawnZ]);
+    this.yaw      = 0;             // rotation around Y; 0 = looking +Z
+    this.pitch    = -12 * DEG2RAD; // rotation around X; positive = look up
     this.fov      = 70 * DEG2RAD;
     this.speed    = FLY_SPEED;
 
@@ -18,43 +24,195 @@ export class FlyCamera {
 
     this._keys   = {};
     this._locked = false;
+    this._inputEnabled = true;
+
+    this._mobile = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+    this._touchMove = { strafe: 0, fwd: 0 };
+    this._touchLook = { active: false, pointerId: null, lastX: 0, lastY: 0 };
+    this._joystick = { active: false, pointerId: null, radius: 34 };
+
     this._bindInput();
   }
 
   _bindInput() {
-    document.addEventListener('keydown', e => { this._keys[e.code] = true; });
-    document.addEventListener('keyup',   e => { this._keys[e.code] = false; });
+    const overlay = document.getElementById('overlay');
+    const overlayButtons = [
+      document.getElementById('overlay-start'),
+      document.getElementById('overlay-close'),
+    ].filter(Boolean);
 
-    this.canvas.addEventListener('click', () => this.canvas.requestPointerLock());
+    this._inputEnabled = !overlay || overlay.classList.contains('hidden');
 
-    document.addEventListener('pointerlockchange', () => {
-      this._locked = document.pointerLockElement === this.canvas;
-      document.getElementById('overlay')?.classList.toggle('hidden', this._locked);
+    const closeOverlay = (requestLock) => {
+      overlay?.classList.add('hidden');
+      this._inputEnabled = true;
+      this._keys = {};
+      if (requestLock) this._requestPointerLock();
+    };
+
+    for (const button of overlayButtons) {
+      button.addEventListener('click', e => {
+        e.preventDefault();
+        closeOverlay(!this._mobile);
+      });
+    }
+
+    document.addEventListener('keydown', e => {
+      if (!this._inputEnabled) {
+        if (e.code === 'Escape') closeOverlay(false);
+        return;
+      }
+      this._keys[e.code] = true;
     });
 
-    document.addEventListener('mousemove', e => {
-      if (!this._locked) return;
-      this.yaw   += e.movementX * 0.0018;
-      this.pitch -= e.movementY * 0.0018;
-      this.pitch  = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, this.pitch));
-    });
+    document.addEventListener('keyup', e => { this._keys[e.code] = false; });
+    window.addEventListener('blur', () => { this._keys = {}; });
+
+    if (!this._mobile) {
+      this.canvas.addEventListener('click', () => {
+        if (this._inputEnabled) this._requestPointerLock();
+      });
+
+      document.addEventListener('pointerlockchange', () => {
+        this._locked = document.pointerLockElement === this.canvas;
+      });
+
+      document.addEventListener('mousemove', e => {
+        if (!this._locked) return;
+        this.yaw   += e.movementX * 0.0018;
+        this.pitch -= e.movementY * 0.0018;
+        this.pitch  = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, this.pitch));
+      });
+    } else {
+      this._locked = true;
+
+      this.canvas.addEventListener('pointerdown', e => {
+        if (!this._inputEnabled) return;
+        if (e.target.closest('#mobile-controls')) return;
+        e.preventDefault();
+        this.canvas.setPointerCapture?.(e.pointerId);
+        this._touchLook.active = true;
+        this._touchLook.pointerId = e.pointerId;
+        this._touchLook.lastX = e.clientX;
+        this._touchLook.lastY = e.clientY;
+      });
+
+      this.canvas.addEventListener('pointermove', e => {
+        if (!this._touchLook.active || e.pointerId !== this._touchLook.pointerId) return;
+        e.preventDefault();
+        const dx = e.clientX - this._touchLook.lastX;
+        const dy = e.clientY - this._touchLook.lastY;
+
+        this.yaw   += dx * 0.0045;
+        this.pitch -= dy * 0.0045;
+        this.pitch  = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, this.pitch));
+
+        this._touchLook.lastX = e.clientX;
+        this._touchLook.lastY = e.clientY;
+      });
+
+      const stopLook = e => {
+        if (e.pointerId !== this._touchLook.pointerId) return;
+        this._touchLook.active = false;
+        this._touchLook.pointerId = null;
+      };
+      this.canvas.addEventListener('pointerup', stopLook);
+      this.canvas.addEventListener('pointercancel', stopLook);
+
+      this._bindJoystick();
+    }
 
     document.addEventListener('wheel', e => {
+      if (!this._inputEnabled) return;
       this.speed = Math.max(0.5, Math.min(100, this.speed * (e.deltaY > 0 ? 0.9 : 1.1)));
     }, { passive: true });
   }
 
+  _requestPointerLock() {
+    const request = this.canvas.requestPointerLock?.();
+    request?.catch?.(() => {});
+  }
+
+  _bindJoystick() {
+    const base = document.getElementById('move-joystick');
+    const knob = document.getElementById('move-joystick-knob');
+    if (!base || !knob) return;
+
+    const release = (e) => {
+      if (e.pointerId !== this._joystick.pointerId) return;
+      this._joystick.active = false;
+      this._joystick.pointerId = null;
+      this._touchMove.strafe = 0;
+      this._touchMove.fwd = 0;
+      knob.style.transform = 'translate(-50%, -50%)';
+    };
+
+    const move = (e) => {
+      if (!this._joystick.active || e.pointerId !== this._joystick.pointerId) return;
+      const r = base.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+
+      let dx = e.clientX - cx;
+      let dy = e.clientY - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist > this._joystick.radius) {
+        const k = this._joystick.radius / dist;
+        dx *= k;
+        dy *= k;
+      }
+
+      const nx = dx / this._joystick.radius;
+      const ny = dy / this._joystick.radius;
+
+      this._touchMove.strafe = nx;
+      this._touchMove.fwd = -ny;
+
+      knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    };
+
+    base.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      base.setPointerCapture?.(e.pointerId);
+      this._joystick.active = true;
+      this._joystick.pointerId = e.pointerId;
+      move(e);
+    });
+
+    base.addEventListener('pointermove', move);
+    base.addEventListener('pointerup', release);
+    base.addEventListener('pointercancel', release);
+  }
+
   update(dt) {
+    if (!this._inputEnabled) {
+      this._buildMatrices();
+      return;
+    }
+
     const k   = this._keys;
     const sy  = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     // forward=(sy,0,cy)  right=(cy,0,-sy)  consistent with yaw=0→+Z
-    const fwd    = k['KeyW'] ? 1 : k['KeyS'] ? -1 : 0;
-    const strafe = k['KeyD'] ? 1 : k['KeyA'] ? -1 : 0;
+    const keyboardFwd    = k['KeyW'] ? 1 : k['KeyS'] ? -1 : 0;
+    const keyboardStrafe = k['KeyD'] ? 1 : k['KeyA'] ? -1 : 0;
+    const fwd    = Math.max(-1, Math.min(1, keyboardFwd + this._touchMove.fwd));
+    const strafe = Math.max(-1, Math.min(1, keyboardStrafe + this._touchMove.strafe));
     const vert   = k['Space'] ? 1 : (k['ShiftLeft'] || k['ShiftRight']) ? -1 : 0;
 
-    this.position[0] += (sy * fwd + cy * strafe) * this.speed * dt;
-    this.position[2] += (cy * fwd - sy * strafe) * this.speed * dt;
-    this.position[1] += vert * this.speed * dt;
+    let dx = sy * cp * fwd + cy * strafe;
+    let dy = sp * fwd + vert;
+    let dz = cy * cp * fwd - sy * strafe;
+    const len = Math.hypot(dx, dy, dz);
+    if (len > 1) {
+      dx /= len;
+      dy /= len;
+      dz /= len;
+    }
+
+    this.position[0] += dx * this.speed * dt;
+    this.position[1] += dy * this.speed * dt;
+    this.position[2] += dz * this.speed * dt;
 
     this._buildMatrices();
   }
@@ -89,7 +247,7 @@ function _perspective(out, fovy, aspect, near, far) {
 
 function _lookAt(out, eye, fdx, fdy, fdz) {
   // right = up(0,1,0) × forward
-  let rx = -fdz, ry = 0, rz = fdx;
+  let rx = fdz, ry = 0, rz = -fdx;
   const rLen = Math.sqrt(rx*rx + rz*rz) || 1;
   rx /= rLen; rz /= rLen;
 

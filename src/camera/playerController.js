@@ -78,6 +78,17 @@ export class PlayerController {
       if (!this._locked) this.canvas.requestPointerLock();
     });
 
+    // Overlay Start / Close buttons (the overlay sits above the canvas so
+    // clicks on it don't reach the canvas handler above).
+    const startBtn = document.getElementById('overlay-start');
+    const closeBtn = document.getElementById('overlay-close');
+    const dismissOverlay = () => {
+      document.getElementById('overlay')?.classList.add('hidden');
+      this.canvas.requestPointerLock?.();
+    };
+    startBtn?.addEventListener('click', dismissOverlay);
+    closeBtn?.addEventListener('click', dismissOverlay);
+
     document.addEventListener('pointerlockchange', () => {
       this._locked = document.pointerLockElement === this.canvas;
       document.getElementById('overlay')?.classList.toggle('hidden', this._locked);
