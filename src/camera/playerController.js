@@ -52,6 +52,11 @@ export class PlayerController {
 
     this._keys     = {};
     this._locked   = false;
+    this._inputEnabled = true;
+    this._mobile = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+    this._touchMove = { strafe: 0, fwd: 0 };
+    this._touchLook = { active: false, pointerId: null, lastX: 0, lastY: 0 };
+    this._joystick = { active: false, pointerId: null, radius: 34 };
     this._jumpReq  = false;
     this._lastJumpKey = false;
     this._lastModeKey = false;
@@ -68,38 +73,87 @@ export class PlayerController {
   }
 
   _bindInput() {
+    const overlay = document.getElementById('overlay');
+    const overlayButtons = [
+      document.getElementById('overlay-start'),
+      document.getElementById('overlay-close'),
+    ].filter(Boolean);
+
+    this._inputEnabled = !overlay || overlay.classList.contains('hidden');
+
+    const closeOverlay = (requestLock) => {
+      overlay?.classList.add('hidden');
+      this._inputEnabled = true;
+      this._keys = {};
+      if (requestLock) this.canvas.requestPointerLock?.();
+    };
+
+    for (const button of overlayButtons) {
+      button.addEventListener('click', e => {
+        e.preventDefault();
+        closeOverlay(!this._mobile);
+      });
+    }
+
     document.addEventListener('keydown', e => {
+      if (!this._inputEnabled) {
+        if (e.code === 'Escape') closeOverlay(false);
+        return;
+      }
       this._keys[e.code] = true;
       if (e.code === 'Space') e.preventDefault();
     });
     document.addEventListener('keyup', e => { this._keys[e.code] = false; });
+    window.addEventListener('blur', () => { this._keys = {}; });
 
-    this.canvas.addEventListener('click', () => {
-      if (!this._locked) this.canvas.requestPointerLock();
-    });
+    if (!this._mobile) {
+      this.canvas.addEventListener('click', () => {
+        if (!this._locked && this._inputEnabled) this.canvas.requestPointerLock?.();
+      });
 
-    // Overlay Start / Close buttons (the overlay sits above the canvas so
-    // clicks on it don't reach the canvas handler above).
-    const startBtn = document.getElementById('overlay-start');
-    const closeBtn = document.getElementById('overlay-close');
-    const dismissOverlay = () => {
-      document.getElementById('overlay')?.classList.add('hidden');
-      this.canvas.requestPointerLock?.();
-    };
-    startBtn?.addEventListener('click', dismissOverlay);
-    closeBtn?.addEventListener('click', dismissOverlay);
+      document.addEventListener('pointerlockchange', () => {
+        this._locked = document.pointerLockElement === this.canvas;
+        document.getElementById('overlay')?.classList.toggle('hidden', this._locked);
+      });
 
-    document.addEventListener('pointerlockchange', () => {
-      this._locked = document.pointerLockElement === this.canvas;
-      document.getElementById('overlay')?.classList.toggle('hidden', this._locked);
-    });
-
-    document.addEventListener('mousemove', e => {
-      if (!this._locked) return;
-      this.yaw   += e.movementX * 0.0018;
-      this.pitch -= e.movementY * 0.0018;
-      this.pitch  = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, this.pitch));
-    });
+      document.addEventListener('mousemove', e => {
+        if (!this._locked) return;
+        this.yaw   += e.movementX * 0.0018;
+        this.pitch -= e.movementY * 0.0018;
+        this.pitch  = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, this.pitch));
+      });
+    } else {
+      this._locked = true;
+      this.canvas.addEventListener('pointerdown', e => {
+        if (!this._inputEnabled) return;
+        if (e.target.closest('#mobile-controls')) return;
+        e.preventDefault();
+        this.canvas.setPointerCapture?.(e.pointerId);
+        this._touchLook.active = true;
+        this._touchLook.pointerId = e.pointerId;
+        this._touchLook.lastX = e.clientX;
+        this._touchLook.lastY = e.clientY;
+      });
+      this.canvas.addEventListener('pointermove', e => {
+        if (!this._touchLook.active || e.pointerId !== this._touchLook.pointerId) return;
+        e.preventDefault();
+        const dx = e.clientX - this._touchLook.lastX;
+        const dy = e.clientY - this._touchLook.lastY;
+        this.yaw += dx * 0.0045;
+        this.pitch -= dy * 0.0045;
+        this.pitch = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, this.pitch));
+        this._touchLook.lastX = e.clientX;
+        this._touchLook.lastY = e.clientY;
+      });
+      const stopLook = e => {
+        if (e.pointerId !== this._touchLook.pointerId) return;
+        this._touchLook.active = false;
+        this._touchLook.pointerId = null;
+      };
+      this.canvas.addEventListener('pointerup', stopLook);
+      this.canvas.addEventListener('pointercancel', stopLook);
+      this._bindJoystick();
+    }
 
     document.addEventListener('wheel', e => {
       // Cycle selected block
@@ -125,6 +179,47 @@ export class PlayerController {
     });
   }
 
+  _bindJoystick() {
+    const base = document.getElementById('move-joystick');
+    const knob = document.getElementById('move-joystick-knob');
+    if (!base || !knob) return;
+
+    const release = (e) => {
+      if (e.pointerId !== this._joystick.pointerId) return;
+      this._joystick.active = false;
+      this._joystick.pointerId = null;
+      this._touchMove.strafe = 0;
+      this._touchMove.fwd = 0;
+      knob.style.transform = 'translate(-50%, -50%)';
+    };
+    const move = (e) => {
+      if (!this._joystick.active || e.pointerId !== this._joystick.pointerId) return;
+      const r = base.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      let dx = e.clientX - cx;
+      let dy = e.clientY - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist > this._joystick.radius) {
+        const k = this._joystick.radius / dist;
+        dx *= k; dy *= k;
+      }
+      this._touchMove.strafe = dx / this._joystick.radius;
+      this._touchMove.fwd = -(dy / this._joystick.radius);
+      knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    };
+    base.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      base.setPointerCapture?.(e.pointerId);
+      this._joystick.active = true;
+      this._joystick.pointerId = e.pointerId;
+      move(e);
+    });
+    base.addEventListener('pointermove', move);
+    base.addEventListener('pointerup', release);
+    base.addEventListener('pointercancel', release);
+  }
+
   _toggleMode() {
     this.mode = this.mode === 'walk' ? 'fly' : 'walk';
     this.velocity[1] = 0;
@@ -138,8 +233,10 @@ export class PlayerController {
 
     // Build view direction
     const cy = Math.cos(this.yaw),   sy = Math.sin(this.yaw);
-    const fwd    = (this._keys['KeyW'] ? 1 : 0) - (this._keys['KeyS'] ? 1 : 0);
-    const strafe = (this._keys['KeyD'] ? 1 : 0) - (this._keys['KeyA'] ? 1 : 0);
+    const keyboardFwd = (this._keys['KeyW'] ? 1 : 0) - (this._keys['KeyS'] ? 1 : 0);
+    const keyboardStrafe = (this._keys['KeyD'] ? 1 : 0) - (this._keys['KeyA'] ? 1 : 0);
+    const fwd = Math.max(-1, Math.min(1, keyboardFwd + this._touchMove.fwd));
+    const strafe = Math.max(-1, Math.min(1, keyboardStrafe + this._touchMove.strafe));
 
     // Horizontal velocity from input (no inertia — feels responsive).
     let speed = this.mode === 'fly' ? FLY_SPEED : WALK_SPEED;
@@ -244,7 +341,7 @@ function _perspective(out, fovy, aspect, near, far) {
 }
 
 function _lookAt(out, eye, fdx, fdy, fdz) {
-  let rx = -fdz, ry = 0, rz = fdx;
+  let rx = fdz, ry = 0, rz = -fdx;
   const rLen = Math.sqrt(rx*rx + rz*rz) || 1;
   rx /= rLen; rz /= rLen;
 
