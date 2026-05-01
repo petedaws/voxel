@@ -11,6 +11,7 @@ export class Chunk {
     this.state = ChunkState.PENDING;
     this.voxels = null; // Uint8Array once generated
     this.gpu    = null; // { vao, vbo, ibo, indexCount } once uploaded
+    this.busy   = false; // a remesh request is in flight (for edits)
   }
 
   key() {
