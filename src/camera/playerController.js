@@ -244,15 +244,29 @@ export class PlayerController {
 
     let vx = sy * fwd + cy * strafe;
     let vz = cy * fwd - sy * strafe;
-    const len = Math.hypot(vx, vz);
-    if (len > 0) { vx = vx / len * speed; vz = vz / len * speed; }
-    this.velocity[0] = vx;
-    this.velocity[2] = vz;
 
     if (this.mode === 'fly') {
-      const vy = (this._keys['Space'] ? 1 : 0) - ((this._keys['ShiftLeft'] || this._keys['ShiftRight']) ? 1 : 0);
-      this.velocity[1] = vy * speed;
+      const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+      const vertical = (this._keys['Space'] ? 1 : 0) - ((this._keys['ShiftLeft'] || this._keys['ShiftRight']) ? 1 : 0);
+      let vy = sp * fwd + vertical;
+      vx = sy * cp * fwd + cy * strafe;
+      vz = cy * cp * fwd - sy * strafe;
+
+      const len = Math.hypot(vx, vy, vz);
+      if (len > 0) {
+        this.velocity[0] = vx / len * speed;
+        this.velocity[1] = vy / len * speed;
+        this.velocity[2] = vz / len * speed;
+      } else {
+        this.velocity[0] = 0;
+        this.velocity[1] = 0;
+        this.velocity[2] = 0;
+      }
     } else {
+      const len = Math.hypot(vx, vz);
+      if (len > 0) { vx = vx / len * speed; vz = vz / len * speed; }
+      this.velocity[0] = vx;
+      this.velocity[2] = vz;
       // Walk: gravity + jump.
       const wantJump = !!this._keys['Space'];
       if (wantJump && !this._lastJumpKey && this.onGround) {
